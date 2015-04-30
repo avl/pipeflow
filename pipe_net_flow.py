@@ -196,6 +196,7 @@ class Pump(object):
         self.name=name
         self.flow=0.0
 
+        self.zero=zero
         self.equivdists=0.0
            
         self.A=PipeEnd(self,0)
@@ -252,7 +253,9 @@ class Simulator(object):
         
         zeropoint=[x for x in allpoints if x.zero]
         if len(zeropoint)!=1:
-            pumps=[x for x in allpipes if isinstance(x,Pump)]
+            pumps=[x for x in allpipes if isinstance(x,Pump) and x.zero]
+            if len(pumps)==0:       
+                pumps=[x for x in allpipes if isinstance(x,Pump)]
             if len(pumps)==1:
                 pumps[0].setzero()
             else:
