@@ -1,12 +1,10 @@
 #encoding=utf8
 import math
 import random
-import odsreader
 
 class Curve(object):
     def __init__(self,points): #points are tuple  (pressure,flow)
         self.points=sorted(points,key=lambda x:x[0])
-        #print "Curvp:",self.points
     def get_flow(self,pressure):
         for p1,p2 in zip(self.points,self.points[1:]):
             pressure1,flow1=p1
@@ -46,7 +44,6 @@ class PipeEnd(object):
         self.connected_point=None
 
 fluid_kinematic_viscosity=9.7937E-7
-#fluid_kinematic_viscosity=1e-6
 fluid_density=(789*0.3 + 1000.0*0.7)
         
 
@@ -61,7 +58,7 @@ class FanCoil(object):
         self.maxpower=maxpower
         self.valve_kvs=valve_kvs
         
-        #flow=math.sqrt(abs(pdiff)*self.k)
+        #flow=math.sqrt(abs(pdiff)*self.k) #P in bar
         #flow**2 = pdiff*self.k
         #k = flow**2/pdiff
         flow=flow_lph/1000.0/3600.0
@@ -77,10 +74,8 @@ class FanCoil(object):
     def __repr__(self):
         return "Fancoil(%s)"%(self.name,)
     def calcflow(self):
-        #print "Fancoil k:",self.k
         pdiff=(self.A.connected_point.pressure-self.B.connected_point.pressure)        
         
-        #pdiff=0.02e3
         if abs(pdiff)<1e-2:
             self.flow=0
         else:
@@ -95,8 +90,6 @@ class FanCoil(object):
                 Kvs = self.valve_kvs
                 F = self.flow*3600
                 valveloss=SG/((Kvs/F)**2.0) * 100.0e3
-                #print "FloW: l/h",self.flow*3600*1000.0
-                #print "Valve loss:",valveloss*1e3,"kPa"
                 self.valveloss=valveloss
             flow=math.sqrt((abs(pdiff-valveloss))*self.k)
             if flow>self.maxflow:
@@ -108,7 +101,6 @@ class FanCoil(object):
                 self.flow=-flow
             else:
                 self.flow=flow
-        #print "Fancoil flow:",self.flow*3600.0*1000.0,"l/h at",pdiff/1000.0,"kPa"
                 
         
 class Pipe(object):
@@ -137,10 +129,6 @@ class Pipe(object):
             self.flow=-flowspeed*area
         else:
             self.flow=flowspeed*area
-        #print "Pipe flow at pressure diff %f kPa: %f l/h"%(pdiff/1000.0,self.flow*1000.0*3600.0)
-        
-        #pdiff=self.A.connected_point.pressure-self.B.connected_point.pressure 
-        #self.flow=pdiff*30.0 #temp         
 
 def solve_flow(pdiff,diameter,length,flowspeed,roughness=0.03e-3):
     r=diameter/2.0
@@ -150,41 +138,16 @@ def solve_flow(pdiff,diameter,length,flowspeed,roughness=0.03e-3):
     if reynolds<200:
         reynolds=200
     
-    #reynolds=27000
-    
-    #reynolds=1000.0
-    #print "Reynolds:",reynolds
-    #print "Roughness/diameter:",roughness/diameter
-    #print "Thelog:",math.log((7/reynolds)**0.9+0.27*(roughness/diameter))
     A=(-2.457*math.log( ( ((7.0/reynolds)**0.9 + 0.27*(roughness/diameter))  )) )**16.0
-    #print "A:",A
+
     B=(37530.0/reynolds)**16.0
-    #print "A+B:",A+B
+
     f = 8 * (((8.0/reynolds)**12.0+(1.0/((A+B)**1.5))) ** (1/12.0))
     
-    
-    #print "Wrong f:",f
-    #f=0.0055*(1 + (2e4 * (roughness/diameter) + 1e6/reynolds)**(1/3.0))
-    
-    #f=0.04
-    #f=0.2095
-    #print "Got f:",f
-    #f=0.026
-    #print "Right f:",f
-    #print "Resistance coeff:",f
-
-    # pdiff = f * self.length / self.diameter  *  fluid_density * flowspeed**2.0 / 2.0
-    # pdiff = ((f * self.length / self.diameter  *  fluid_density)/2.0) * flowspeed**2.0
-    # pdiff / ((f * self.length / self.diameter  *  fluid_density)/2.0) = flowspeed**2.0
-    # sqrt( pdiff / ((f * self.length / self.diameter  *  fluid_density)/2.0) ) = flowspeed
-    
-    #print "Pdiff, bar:",pdiff/100e3
-    #print "Pdiff, mbar:",1000.0*pdiff/100e3
     
     flowspeed = math.sqrt(abs(pdiff) / ((f * length / diameter  *  fluid_density)/2.0) )
     
     
-    #print "Volume flow:",3600*math.pi*flowspeed* (diameter/2.0)**2.0,"m3/h","flowspeed:",flowspeed,"m/s","m^3/s:",math.pi*flowspeed* (diameter/2.0)**2.0
     return flowspeed
     
     
@@ -195,15 +158,6 @@ class FittingEndpoint(object):
 class Fitting(object):
     pass
 
-"""
-class Appliance(object):
-    def __init__(self,name,pipes,RCK):
-        self.name=name
-        self.point=VirtualPoint(name)
-        for pipe in pipes:
-            self.point.connect(pipe)
-            pipe.equivdists.append(RCK)
-"""            
 
 class TPiece(Fitting):
     def __init__(self,name,pipe1,pipe2,tee,equiv_dists=[0.0,0.0,0.0]):
@@ -254,7 +208,6 @@ class Pump(object):
         if self.equivdists>0: raise Exception("This program does not support connecting pumps directly to T-junctions or elbows. You must connect it to a short straight pipe first (may use 0 length)")
        
         
-        #print "Pump flow at pressure diff %f kPa: %f l/h"%(pdiff/1000.0,self.flow*1000.0*3600.0)
 def find_all_pipes(point,seen_points,seen_pipes):
     if point in seen_points:
         return
@@ -312,22 +265,16 @@ class Simulator(object):
                 point.flowsum=0.0
 
             for pipe in allpipes:
-                #print "Pipe:",pipe.name,"flow was:",pipe.flow,
                 pipe.calcflow()
-                #print "new flow:",pipe.flow
                 pipe.A.connected_point.flowsum-=pipe.flow
                 pipe.B.connected_point.flowsum+=pipe.flow
-                #print "points:",pipe.A.connected_point,pipe.B.connected_point
-                #print "Flowsums:",pipe.A.connected_point.flowsum,pipe.B.connected_point.flowsum
             
             for point in allpoints:
                 if point.zero:
                     point.pressure=0.0
                 else:
                     adjust=(0.5+0.5*random.random())*pressure_adjust*point.flowsum
-                    #print "Point:",point.name,"pressure was:",point.pressure,"flow sum:",point.flowsum,"adjust:",adjust,"adjust factor:",pressure_adjust
                     point.pressure+=adjust
-                    #print "new pressure:",point.pressure
                 
             
             pressure_adjust/=1.0001
@@ -368,18 +315,40 @@ def kpa_lpm_to_si_units(points):
         
         
         
+        
+        
+        
+        
+        
+        
+        
+        
+        
+# Installation specific parameters:        
 def run():
-    odsdoc=odsreader.ODSReader("pipeplan_smaller.ods")
+
+    pipes_spec=[
+["Pipe 1",	13,	9],
+["Pipe 2",	13,	9],
+["Pipe 3",	20,	9],
+["Pipe 4",	13,	9],
+["Pipe 5",	13,	9],
+["Pipe 6",	20,	9],
+["Pipe 7",	13,	2],
+["Pipe 8",	13,	2],
+["Pipe 9",	13,	2],
+["Pipe 10",	13,	2],
+["Pipe 11",	20,	0.5],
+["Pipe 12",	13,	2.5],
+["Pipe 13",	20,	0.5],
+["Pipe 14",	13,	2.5]
+    ]
 
     pipes=[]
     def getpipe(nr):
         return pipes[nr-1]
-    for idx,row in enumerate(odsdoc.getSheet("Pipes")):
-        if (not any(row)): continue
-
-        if idx==0: continue
-        number,name,descr,diam,length=row[:5]
-        number=int(number)
+    for row in pipes_spec:
+        name,diam,length=row[:3]
         diam=float(diam)
         length=float(length)
         
@@ -388,11 +357,11 @@ def run():
 
    
     x=1
-    FKV=crc84=FanCoil("FK-V",1188.0,20.0,6979.0,valve_kvs=5.5,stryp=100.0*1)
-    FKA=crc24a=FanCoil("FK-A",324.0,15.9,1954.0,valve_kvs=1.7,stryp=100*1)
-    FKB=crc24b=FanCoil("FK-B",324.0,15.9,1954.0,valve_kvs=1.7,stryp=100*1)
-    FKG=crc54a=FanCoil("FK-G",756.0,35.5,4395.0,valve_kvs=2.8,stryp=100*(0))
-    FKM=crc54b=FanCoil("FK-M",756.0,35.5,4395.0,valve_kvs=2.8,stryp=100*(1))
+    FKV=crc84=FanCoil("FK-V",1188.0,20.0,6979.0,valve_kvs=5.5,stryp=0)
+    FKA=crc24a=FanCoil("FK-A",324.0,15.9,1954.0,valve_kvs=1.7,stryp=0)
+    FKB=crc24b=FanCoil("FK-B",324.0,15.9,1954.0,valve_kvs=1.7,stryp=0)
+    FKG=crc54a=FanCoil("FK-G",756.0,35.5,4395.0,valve_kvs=2.8,stryp=0)
+    FKM=crc54b=FanCoil("FK-M",756.0,35.5,4395.0,valve_kvs=2.8,stryp=100)
     fancoils=[FKV,FKA,FKB,FKG,FKM]
 
     
@@ -418,49 +387,7 @@ def run():
     Joint("ansl9", getpipe(12).B,FKM.A)
     Joint("ansl10",getpipe(14).A,FKM.B)
     
-    K1.point.pressure=31e3
-    
-    
-
-    """
-    ror1=Pipe("ror1",
-
-    till_kok=Pipe("till_kök",7.0,26.0e-3)
-
-    till_sovrum=Pipe("till_sovrum",4.0,20.0e-3)
-    
-    fran_sovrum=Pipe("från_sovrum",4.0,20.0e-3)
-
-    fran_kok=Pipe("från_kök",7.0,26.0e-3)
-    
-    
-    #crc84=FanCoil("Crc84",1188.0,20.0)
-    #crc54=FanCoil("Crc54",756.0,35.5)
-    crc34=FanCoil("Crc34",468.0,13.1)
-    crc34b=FanCoil("Crc34B",468.0,13.1)
-    """
-    
-    
-        
-    
-    #TPiece("T1",pipe1.A,pipe2.A,pump.A)
-    #TPiece("T1",pipe1.B,pipe2.B,pump.B)
-    
-    """
-    Joint("pumpansl.1",pump.A,till_kok.A)
-    Joint("pumpansl.2",pump.B,fran_kok.B)
-    
-    TPiece("takskarv1",till_kok.B,crc84.A,till_sovrum.A)
-    
-    
-    TPiece("takskarv2",fran_kok.A,crc84.B,fran_sovrum.B)
-    
-    Joint("sovansl.1",till_sovrum.B,crc34.A,crc34b.A)
-    Joint("sovansl.2",crc34.B,fran_sovrum.A,crc34b.B)
-    """
-    
-    
-    
+    K1.point.pressure=31e3            
     
     simulator=Simulator()
     simulator.simulate(pipes+fancoils+[pump])
