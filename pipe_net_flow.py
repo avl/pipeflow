@@ -15,12 +15,15 @@ def run():
         if (not any(row)): continue
 
         if idx==0: continue
-        number,name,descr,diam,length=row[:5]
+        number,name,descr,diam,length,elbows=row[:6]
         number=int(number)
         diam=float(diam)
         length=float(length)
-        
-        pipe=Pipe(name,length,diam*1e-3)
+        restrictions=[]
+        if elbows.strip():
+            num_elbows=int(elbows.strip())
+            restrictions.append(Elbow90deg(num_elbows))
+        pipe=Pipe(name,length,diam*1e-3,restrictions=restrictions)
         pipes.append(pipe)
 
    
@@ -35,8 +38,8 @@ def run():
     
     
     #PCS44 pump: pump=Pump("pump",Curve(kpa_lph_to_si_units([(0.0,2800),(53.0,520),(60.0,0)])))
-    #pump=Pump("Grundfos Alpha2",Curve(kpa_lph_to_si_units([(0.0,4200),(10.0,4000.0),(20.0,2900.0),(30.0,2300.0),(40.0,1600.0),(50.0,1100.0),(58.0,600.0),(60.0,0)])))
-    pump=Pump("Linear pump",Curve(kpa_lph_to_si_units([(0.0,4200),(60.0,0)])))
+    pump=Pump("Grundfos Alpha2",Curve(kpa_lph_to_si_units([(0.0,4200),(10.0,4000.0),(20.0,2900.0),(30.0,2300.0),(40.0,1600.0),(50.0,1100.0),(58.0,600.0),(60.0,0)])))
+    #pump=Pump("Linear pump",Curve(kpa_lph_to_si_units([(0.0,4200),(60.0,0)])))
     
     K1=Joint("K1",pump.B,getpipe(1).A,getpipe(2).A,getpipe(3).A)
     K2=Joint("K2",getpipe(2).B,getpipe(7).A,getpipe(8).A)
