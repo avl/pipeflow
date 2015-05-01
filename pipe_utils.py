@@ -27,6 +27,8 @@ class VirtualPoint(object):
     def __init__(self,name):
         self.name=name
         self.pipes=[]
+        self.pipes_A=[]
+        self.pipes_B=[]
         self.flowsum=0.0
         self.pressure=0.0
         self.zero=False
@@ -35,6 +37,10 @@ class VirtualPoint(object):
         
     def connect(self,pipe_end):
         self.pipes.append(pipe_end.pipe)
+        if pipe_end.idx==0:
+            self.pipes_A.append(pipe_end.pipe)
+        else:
+            self.pipes_B.append(pipe_end.pipe)
         pipe_end.connected_point=self
         
         
@@ -74,11 +80,10 @@ class FanCoil(object):
             (pdiff-self.valveloss)/1e3,self.valveloss/1e3,self.flow*1000*3600.0)
     def __repr__(self):
         return "Fancoil(%s)"%(self.name,)
-    def calcflow(self):
-        pdiff=(self.A.connected_point.pressure-self.B.connected_point.pressure)        
+    def calcflow(self,pdiff):
         
-        if abs(pdiff)<1e-2:
-            self.flow=0
+        if abs(pdiff)<1e-4:
+            return 0.0
         else:
             valveloss=0
             if self.valve_kvs and abs(self.flow)>1e-20:
@@ -93,15 +98,15 @@ class FanCoil(object):
                 valveloss=SG/((Kvs/F)**2.0) * 100.0e3
                 self.valveloss=valveloss
             flow=math.sqrt((abs(pdiff-valveloss))*self.k)
-            if flow>self.maxflow:
-                flow=self.maxflow
+            #if flow>self.maxflow:
+            #    flow=self.maxflow
             if self.stryp:
                 flow*=(100.0-self.stryp)/100.0
                 
             if pdiff<0:
-                self.flow=-flow
+                return -flow
             else:
-                self.flow=flow
+                return flow
                 
         
 class Pipe(object):
@@ -117,19 +122,18 @@ class Pipe(object):
 
     def __repr__(self):
         return "Point(%s)"%(self.name,)
-    def calcflow(self):
+    def calcflow(self,pdiff):
         r=self.diameter/2.0
         area=math.pi*r**2.0        
         flowspeed = abs(self.flow/area)
-        pdiff=(self.A.connected_point.pressure-self.B.connected_point.pressure)        
         diameter=self.diameter
         
         flowspeed=solve_flow(pdiff,diameter,self.length+self.equivdists,flowspeed,self.roughness)
         
         if pdiff<0:
-            self.flow=-flowspeed*area
+            return -flowspeed*area
         else:
-            self.flow=flowspeed*area
+            return flowspeed*area
 
 def solve_flow(pdiff,diameter,length,flowspeed,roughness=0.03e-3):
     r=diameter/2.0
@@ -174,6 +178,7 @@ class Pump(object):
         return "Pump(%s)"%(self.name,)
     def setzero(self):
         self.A.connected_point.zero=True
+        self.A.connected_point.pressure=0.0
 
     def __init__(self,name,curve,zero=False):
         self.name=name
@@ -186,11 +191,11 @@ class Pump(object):
         self.B=PipeEnd(self,1)
         
         self.curve=curve
-    def calcflow(self):
-        pdiff=self.B.connected_point.pressure-self.A.connected_point.pressure 
-        self.flow=self.curve.get_flow(pdiff)
+    def calcflow(self,pdiff):
+
+        flow=self.curve.get_flow(-pdiff)
         if self.equivdists>0: raise Exception("This program does not support connecting pumps directly to T-junctions or elbows. You must connect it to a short straight pipe first (may use 0 length)")
-       
+        return flow
         
 def find_all_pipes(point,seen_points,seen_pipes):
     if point in seen_points:
@@ -245,24 +250,128 @@ class Simulator(object):
                 raise Exception("There must be exactly one point in the graph with pressure defined to zero. Set zero-flag on one of the pumps")        
         pressure_adjust=1e6
         orig_factor=pressure_adjust
+        cowardice=0.1
+        last_residual=1e10
+        kfactor=0.25
         for iter in xrange(50000):
             
             for point in allpoints:
                 point.flowsum=0.0
 
             for pipe in allpipes:
-                pipe.calcflow()
+                pdiff=(pipe.A.connected_point.pressure-pipe.B.connected_point.pressure)        
+                flow=pipe.calcflow(pdiff)
+                epsilon=10.0
+                flowr=pipe.calcflow(pdiff + epsilon)
+                flowl=pipe.calcflow(pdiff - epsilon)
+                
+                pipe.derivative=(flowr-flowl)/(2.0*epsilon)
+                pipe.derivative_r=(flowr-flow)/epsilon
+                pipe.derivative_l=(flow-flowl)/epsilon                                
+                
+                pipe.flow=flow
                 pipe.A.connected_point.flowsum-=pipe.flow
                 pipe.B.connected_point.flowsum+=pipe.flow
-            
-            for point in allpoints:
+
+            #for point in allpoints:
+            if True:
+                kfun=lambda k:abs(k.flowsum) if not k.zero else -1e60
+                point=max(allpoints,key=kfun)
+                biggest_flowsum=abs(point.flowsum)
+                biggest_flownode=point
+                #print "Chose node:",point.name,point.flowsum
                 if point.zero:
                     point.pressure=0.0
                 else:
-                    adjust=(0.5+0.5*random.random())*pressure_adjust*point.flowsum
-                    point.pressure+=adjust
+                    
+                    draining_pipes=point.pipes_A
+                    sourcing_pipes=point.pipes_B
+                    
+                    #P = k * flow**2 => flow = ((P-Pn)/K)**0.5
+                    
+                    # flowsum = sum(n,flow[n])
+                    # flowsum = sum(n,(P/K-P[n]/K[n])**0.5)
+                    # flowsum = sum(n,(P/K-P[n]/K[n])**0.5)
+                        
+                    
+                    epsilon_flow=0.0
+                    doprint=False
+                    #if point.name=="K6" or 1:
+
+                    if point.flowsum>0:
+                        #pressure is too low                        
+                        for drain_pipe in draining_pipes:
+                            epsilon_flow+=drain_pipe.derivative
+                            if doprint:print "incpresdrain Pipe:",drain_pipe,"w/ flow",drain_pipe.flow,"Contributes",drain_pipe.derivative_r,"to epsflow"
+                        for source_pipe in sourcing_pipes:
+                            epsilon_flow+=source_pipe.derivative
+                            if doprint:print "incpressource Pipe:",source_pipe,"w/ flow",source_pipe.flow,"Contributes",source_pipe.derivative_l,"to epsflow"
+                    if point.flowsum<0:
+                        #pressure is too high
+                        
+                        for drain_pipe in draining_pipes:
+                            epsilon_flow+=drain_pipe.derivative
+                            if doprint:print "lowerpresdrain Pipe:",drain_pipe,"w/ flow",drain_pipe.flow,"Contributes",drain_pipe.derivative_l,"to epsflow"
+                        for source_pipe in sourcing_pipes:
+                            epsilon_flow+=source_pipe.derivative
+                            if doprint:print "lowerpressource Pipe:",source_pipe,"w/ flow",source_pipe.flow,"Contributes",source_pipe.derivative_r,"to epsflow"
+                            
+                    if abs(epsilon_flow)>1e-15:
+                        one_pascal_change=epsilon_flow
+                        pressure_change=.5*point.flowsum/epsilon_flow
+                        if pressure_change>1e3:
+                            pressure_change=1e3
+                        if pressure_change<-1e3:
+                            pressure_change=-1e3
+                        if doprint:print point.name,"Flowsum:",point.flowsum*3600*1000.0,"epsilon flow:",epsilon_flow,"pressure:",point.pressure
+                        point.pressure+=pressure_change
+                        if doprint or True:print "Decided to change pressure by",pressure_change,"to",point.pressure
+                        
+                        for x in xrange(1):
+                            for point1 in allpoints:
+                                point1.flowsum=0.0
+
+                            for pipe in allpipes:
+                                pdiff=(pipe.A.connected_point.pressure-pipe.B.connected_point.pressure)        
+                                flow=pipe.calcflow(pdiff)
+                                epsilon=10.0
+                                flowr=pipe.calcflow(pdiff + epsilon)
+                                flowl=pipe.calcflow(pdiff - epsilon)
+                                
+                                pipe.derivative=(flowr-flowl)/(2.0*epsilon)
+                                pipe.derivative_r=(flowr-flow)/epsilon
+                                pipe.derivative_l=(flow-flowl)/epsilon                                
+                                
+                                pipe.flow=flow
+                                pipe.A.connected_point.flowsum-=pipe.flow
+                                pipe.B.connected_point.flowsum+=pipe.flow
+                                if pipe.A.connected_point.name==point.name:
+                                    print "flowsum:",pipe.A.connected_point.flowsum*3600.0*1000.0 ," abs flow:",pipe.flow*3600.0*1000
+                        print "Result:",point.flowsum*3600.0*1000.0
+                    else:
+                        pass#print "Epsilon flow of point was zero, flowsum was:",point.flowsum
+                        
+                    
+                    #if abs(point.flowsum)>biggest_flowsum:
+                    #    biggest_flownode=point
+                    #    biggest_flowsum=abs(point.flowsum)
+                    
+                    #adjust=(0.5+0.5*random.random())*pressure_adjust*point.flowsum
+                    #point.pressure+=adjust
                 
-            
+            cowardice+=0.1
+            if cowardice>1.0:
+                cowardice=1.0
+            print "Flowsum:",biggest_flowsum*1000.0*3600.0,"l/h",biggest_flownode.name
+            print "Residual:",biggest_flowsum,"Last residual:",last_residual
+            if biggest_flowsum>last_residual:                
+                kfactor*=0.8
+            else:
+                kfactor+=0.1
+            print "Kfacotr:",kfactor
+            last_residual=(biggest_flowsum)
+            #if biggest_flowsum*3600.0*1000.0<0.1:
+            #    break
             pressure_adjust/=1.0001
         print "End adjust:",pressure_adjust/orig_factor
         overspeed=[]
